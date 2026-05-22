@@ -93,6 +93,8 @@ class GameStateService:
                 name=player.name,
                 user_id=player.user_id,
                 player_order=player.player_order,
+                is_bot=player.is_bot,
+                bot_difficulty=player.bot_difficulty,
                 current_score=player.current_score,
                 cricket_state=self._cricket_state_from_player(player),
                 total_darts_thrown=player.total_darts_thrown,

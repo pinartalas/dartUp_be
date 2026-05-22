@@ -95,6 +95,9 @@ class GamePlayer(Base):
     name = Column(String, nullable=False)
     player_order = Column(Integer, nullable=False)
 
+    is_bot = Column(Boolean, nullable=False, default=False)
+    bot_difficulty = Column(String(20), nullable=True)
+
     current_score = Column(Integer, nullable=True)
     cricket_state = Column(JSON, nullable=True)
 

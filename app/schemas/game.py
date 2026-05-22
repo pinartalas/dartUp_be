@@ -24,9 +24,29 @@ class GameSettings(BaseModel):
     x01: Optional[X01Settings] = None
 
 
+class BotDifficulty(str, Enum):
+    EASY = "easy"
+    MEDIUM = "medium"
+    HARD = "hard"
+
+
 class PlayerCreateInput(BaseModel):
     name: str
     user_id: Optional[int] = None
+    is_bot: bool = False
+    bot_difficulty: Optional[BotDifficulty] = None
+
+    @model_validator(mode="after")
+    def validate_bot_config(self) -> "PlayerCreateInput":
+        if self.is_bot:
+            if self.user_id is not None:
+                raise ValueError("bot players must not have user_id")
+            if self.bot_difficulty is None:
+                self.bot_difficulty = BotDifficulty.MEDIUM
+        elif self.bot_difficulty is not None:
+            raise ValueError("non-bot players must not set bot_difficulty")
+
+        return self
 
 
 class CreateGameRequest(BaseModel):
@@ -97,6 +117,8 @@ class PlayerStateResponse(BaseModel):
     name: str
     user_id: Optional[int] = None
     player_order: int
+    is_bot: bool
+    bot_difficulty: Optional[BotDifficulty] = None
     current_score: Optional[int] = None
     cricket_state: Optional[CricketStateResponse] = None
     total_darts_thrown: int

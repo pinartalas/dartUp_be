@@ -66,6 +66,19 @@ def submit_turn(
         _handle_service_error(exc)
 
 
+@router.post("/{game_id}/bot-turn", response_model=SubmitTurnResponse)
+def submit_bot_turn(
+    game_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    service = GameService(db)
+    try:
+        return service.submit_bot_turn(game_id, current_user.id)
+    except GameServiceError as exc:
+        _handle_service_error(exc)
+
+
 @router.get("/{game_id}/stats", response_model=GameStatsResponse)
 def get_game_stats(
     game_id: int,

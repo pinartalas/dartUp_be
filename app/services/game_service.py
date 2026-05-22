@@ -6,7 +6,13 @@ from sqlalchemy.orm import Session, joinedload
 from app.core.exceptions import GameServiceError
 from app.models.game import DartThrow, Game, GamePlayer, Turn
 from app.models.user import User
-from app.schemas.game import CreateGameRequest, SubmitTurnRequest, SubmitTurnResponse
+from app.schemas.game import (
+    CreateGameRequest,
+    DartThrowInput,
+    SubmitTurnRequest,
+    SubmitTurnResponse,
+)
+from app.services.dart_bot_service import DartBotService
 from app.services.game_state_service import GameStateService
 from app.services.scoring.base import PlayerScoringState
 from app.services.scoring.factory import get_scoring_service
@@ -16,6 +22,7 @@ class GameService:
     def __init__(self, db: Session):
         self.db = db
         self.state_service = GameStateService()
+        self.bot_service = DartBotService()
 
     def create_game(self, owner: User, request: CreateGameRequest) -> Game:
         scoring = get_scoring_service(request.game_type.value)
@@ -39,6 +46,12 @@ class GameService:
                 user_id=player_input.user_id,
                 name=player_input.name,
                 player_order=index,
+                is_bot=player_input.is_bot,
+                bot_difficulty=(
+                    player_input.bot_difficulty.value
+                    if player_input.bot_difficulty
+                    else None
+                ),
             )
             self.db.add(game_player)
             self.db.flush()
@@ -80,6 +93,37 @@ class GameService:
             raise GameServiceError("It is not this player's turn", status_code=400)
 
         active_player = self._get_player(game, request.player_id)
+        if active_player.is_bot:
+            raise GameServiceError(
+                "Use bot-turn endpoint for bot players",
+                status_code=400,
+            )
+
+        return self._process_turn(game, active_player, request.throws)
+
+    def submit_bot_turn(self, game_id: int, owner_id: int) -> SubmitTurnResponse:
+        game = self._load_game(game_id)
+        self._assert_owner(game, owner_id)
+
+        if game.status != "active":
+            raise GameServiceError("Game is already finished", status_code=400)
+
+        if game.current_player_id is None:
+            raise GameServiceError("No active player", status_code=400)
+
+        bot_player = self._get_player(game, game.current_player_id)
+        if not bot_player.is_bot:
+            raise GameServiceError("Current player is not a bot", status_code=400)
+
+        throws = self.bot_service.generate_turn(game, bot_player)
+        return self._process_turn(game, bot_player, throws)
+
+    def _process_turn(
+        self,
+        game: Game,
+        active_player: GamePlayer,
+        throws: list[DartThrowInput],
+    ) -> SubmitTurnResponse:
         scoring = get_scoring_service(game.game_type)
 
         player_states = [self._to_scoring_state(p) for p in game.players]
@@ -90,7 +134,7 @@ class GameService:
         result = scoring.process_turn(
             active_player=active_state,
             all_players=player_states,
-            throws=request.throws,
+            throws=throws,
             settings=game.settings or {},
             game_variant=game.game_variant,
         )
@@ -109,7 +153,7 @@ class GameService:
         self.db.add(turn)
         self.db.flush()
 
-        computed_throws = scoring.normalize_throws(request.throws)
+        computed_throws = scoring.normalize_throws(throws)
         for dart in computed_throws:
             self.db.add(
                 DartThrow(
@@ -135,7 +179,6 @@ class GameService:
             )
 
         next_player_id: Optional[int] = None
-        winner = None
 
         if result.is_finished and result.winner_player_id:
             self._finish_game(game, result.winner_player_id)
