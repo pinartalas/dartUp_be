@@ -1,10 +1,15 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
-from app.core.deps import get_db
+from app.core.deps import get_current_user, get_db
 from app.core.security import create_access_token
 from app.models.user import User
-from app.schemas.auth import AuthResponse, SocialLoginRequest, UserResponse
+from app.schemas.auth import (
+    AuthResponse,
+    LogoutResponse,
+    SocialLoginRequest,
+    UserResponse,
+)
 from app.services.google_auth_service import GoogleAuthError, verify_google_id_token
 
 router = APIRouter(tags=["auth"])
@@ -63,6 +68,11 @@ def social_login(request: SocialLoginRequest, db: Session = Depends(get_db)):
         "token_type": "bearer",
         "user": new_user,
     }
+
+
+@router.post("/auth/logout", response_model=LogoutResponse)
+def logout(current_user: User = Depends(get_current_user)):
+    return {"message": "Logged out successfully"}
 
 
 @router.get("/users", response_model=list[UserResponse])

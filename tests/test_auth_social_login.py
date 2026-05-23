@@ -77,3 +77,14 @@ def test_google_social_login_finds_existing_user_by_verified_sub(
 def test_google_social_login_requires_id_token():
     with pytest.raises(ValidationError):
         SocialLoginRequest(provider="google")
+
+
+def test_logout_returns_success_message():
+    user = User(
+        email="logout@example.com",
+        full_name="Logout User",
+        auth_provider="google",
+        provider_user_id="google-sub-logout",
+    )
+
+    assert auth_routes.logout(user) == {"message": "Logged out successfully"}
