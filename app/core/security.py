@@ -4,13 +4,13 @@ from fastapi import HTTPException, status
 from fastapi.security import HTTPBearer
 from jose import JWTError, jwt
 
-from app.core.config import ALGORITHM, SECRET_KEY
+from app.core.config import ACCESS_TOKEN_EXPIRE_DAYS, ALGORITHM, SECRET_KEY
 
 bearer_scheme = HTTPBearer()
 
 
 def create_access_token(user_id: int) -> str:
-    expire = datetime.utcnow() + timedelta(days=7)
+    expire = datetime.utcnow() + timedelta(days=ACCESS_TOKEN_EXPIRE_DAYS)
     payload = {"sub": str(user_id), "exp": expire}
     return jwt.encode(payload, SECRET_KEY, algorithm=ALGORITHM)
 
