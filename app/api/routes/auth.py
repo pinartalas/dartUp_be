@@ -5,6 +5,7 @@ from app.core.deps import get_db
 from app.core.security import create_access_token
 from app.models.user import User
 from app.schemas.auth import AuthResponse, SocialLoginRequest, UserResponse
+from app.services.google_auth_service import GoogleAuthError, verify_google_id_token
 
 router = APIRouter(tags=["auth"])
 
@@ -14,11 +15,26 @@ def social_login(request: SocialLoginRequest, db: Session = Depends(get_db)):
     if request.provider not in ("apple", "google"):
         raise HTTPException(status_code=400, detail="Unsupported auth provider")
 
+    provider = request.provider
+    provider_user_id = request.provider_user_id
+    email = request.email
+    display_name = request.display_name
+
+    if request.provider == "google":
+        try:
+            google_identity = verify_google_id_token(request.id_token or "")
+        except GoogleAuthError as exc:
+            raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
+
+        provider_user_id = google_identity.provider_user_id
+        email = google_identity.email
+        display_name = google_identity.display_name
+
     existing_user = (
         db.query(User)
         .filter(
-            User.auth_provider == request.provider,
-            User.provider_user_id == request.provider_user_id,
+            User.auth_provider == provider,
+            User.provider_user_id == provider_user_id,
         )
         .first()
     )
@@ -32,10 +48,10 @@ def social_login(request: SocialLoginRequest, db: Session = Depends(get_db)):
         }
 
     new_user = User(
-        email=request.email,
-        full_name=request.display_name,
-        auth_provider=request.provider,
-        provider_user_id=request.provider_user_id,
+        email=email,
+        full_name=display_name,
+        auth_provider=provider,
+        provider_user_id=provider_user_id,
     )
     db.add(new_user)
     db.commit()

@@ -18,6 +18,11 @@ CORS_ORIGINS = tuple(
     for origin in os.getenv("CORS_ORIGINS", "").split(",")
     if origin.strip()
 )
+GOOGLE_CLIENT_IDS = tuple(
+    client_id.strip()
+    for client_id in os.getenv("GOOGLE_CLIENT_IDS", "").split(",")
+    if client_id.strip()
+)
 
 CRICKET_SEGMENTS = ("15", "16", "17", "18", "19", "20", "bull")
 X01_VARIANTS = (301, 501, 701, 1001)
