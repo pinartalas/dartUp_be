@@ -105,7 +105,10 @@ def test_google_social_login_returns_conflict_when_email_belongs_to_apple_user(
         )
 
     assert exc_info.value.status_code == 409
-    assert "different sign-in provider" in exc_info.value.detail
+    assert (
+        exc_info.value.detail
+        == "Bu e-posta adresi zaten kayıtlı. Lütfen farklı bir adres ile giriş yapınız."
+    )
     assert db_session.query(User).count() == 1
 
 

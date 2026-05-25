@@ -15,6 +15,10 @@ from app.services.google_auth_service import GoogleAuthError, verify_google_id_t
 
 router = APIRouter(tags=["auth"])
 
+EMAIL_ALREADY_REGISTERED_MESSAGE = (
+    "Bu e-posta adresi zaten kayıtlı. Lütfen farklı bir adres ile giriş yapınız."
+)
+
 
 @router.post("/auth/social-login", response_model=AuthResponse)
 def social_login(request: SocialLoginRequest, db: Session = Depends(get_db)):
@@ -58,7 +62,7 @@ def social_login(request: SocialLoginRequest, db: Session = Depends(get_db)):
         if conflicting_user:
             raise HTTPException(
                 status_code=409,
-                detail="Email is already registered with a different sign-in provider",
+                detail=EMAIL_ALREADY_REGISTERED_MESSAGE,
             )
 
     new_user = User(
@@ -74,7 +78,7 @@ def social_login(request: SocialLoginRequest, db: Session = Depends(get_db)):
         db.rollback()
         raise HTTPException(
             status_code=409,
-            detail="Email is already registered with a different sign-in provider",
+            detail=EMAIL_ALREADY_REGISTERED_MESSAGE,
         ) from exc
     db.refresh(new_user)
 
