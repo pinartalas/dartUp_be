@@ -19,6 +19,7 @@ from app.models.user import User
 from app.schemas.online_room import (
     CreateOnlineRoomRequest,
     JoinOnlineRoomRequest,
+    OnlineRoomCleanupResponse,
     OnlineRoomListResponse,
     OnlineRoomResponse,
 )
@@ -98,6 +99,17 @@ async def join_online_room(
             room,
         )
     return room
+
+
+@router.post("/current/cancel", response_model=OnlineRoomCleanupResponse)
+def cancel_current_user_waiting_rooms(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    cancelled_count = OnlineRoomService(db).cancel_waiting_rooms_for_user(
+        current_user.id,
+    )
+    return OnlineRoomCleanupResponse(cancelled_count=cancelled_count)
 
 
 @router.post("/{room_code}/cancel", response_model=OnlineRoomResponse)

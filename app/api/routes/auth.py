@@ -12,6 +12,7 @@ from app.schemas.auth import (
     UserResponse,
 )
 from app.services.google_auth_service import GoogleAuthError, verify_google_id_token
+from app.services.online_room_service import OnlineRoomService
 
 router = APIRouter(tags=["auth"])
 
@@ -91,7 +92,11 @@ def social_login(request: SocialLoginRequest, db: Session = Depends(get_db)):
 
 
 @router.post("/auth/logout", response_model=LogoutResponse)
-def logout(current_user: User = Depends(get_current_user)):
+def logout(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    OnlineRoomService(db).cancel_waiting_rooms_for_user(current_user.id)
     return {"message": "Logged out successfully"}
 
 

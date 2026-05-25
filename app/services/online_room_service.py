@@ -34,6 +34,8 @@ class OnlineRoomService:
         host: User,
         request: CreateOnlineRoomRequest,
     ) -> OnlineRoomResponse:
+        self.cancel_waiting_rooms_for_user(host.id)
+
         room = OnlineRoom(
             room_code=self._generate_room_code(),
             host_user_id=host.id,
@@ -139,6 +141,24 @@ class OnlineRoomService:
         room.status = OnlineRoomStatus.CANCELLED.value
         self.db.commit()
         return self._build_response(self._load_room(room.id), host_id)
+
+    def cancel_waiting_rooms_for_user(self, user_id: int) -> int:
+        rooms = (
+            self.db.query(OnlineRoom)
+            .filter(
+                OnlineRoom.host_user_id == user_id,
+                OnlineRoom.status == OnlineRoomStatus.WAITING.value,
+            )
+            .all()
+        )
+        if not rooms:
+            return 0
+
+        for room in rooms:
+            room.status = OnlineRoomStatus.CANCELLED.value
+
+        self.db.commit()
+        return len(rooms)
 
     def mark_finished_if_game_finished(self, game_id: int, is_finished: bool) -> None:
         if not is_finished:

@@ -36,6 +36,7 @@ def create_game(
         game = service.create_game(current_user, request)
     except GameServiceError as exc:
         _handle_service_error(exc)
+    OnlineRoomService(db).cancel_waiting_rooms_for_user(current_user.id)
     state_service = GameStateService()
     return state_service.build_game_state(game)
 

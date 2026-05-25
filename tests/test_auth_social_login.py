@@ -5,7 +5,10 @@ from pydantic import ValidationError
 from app.api.routes import auth as auth_routes
 from app.models.user import User
 from app.schemas.auth import SocialLoginRequest
+from app.schemas.game import GameType
+from app.schemas.online_room import CreateOnlineRoomRequest, OnlineRoomStatus
 from app.services.google_auth_service import GoogleIdentity
+from app.services.online_room_service import OnlineRoomService
 
 
 def test_google_social_login_uses_verified_token_payload(db_session, monkeypatch):
@@ -117,12 +120,22 @@ def test_google_social_login_requires_id_token():
         SocialLoginRequest(provider="google")
 
 
-def test_logout_returns_success_message():
-    user = User(
-        email="logout@example.com",
-        full_name="Logout User",
-        auth_provider="google",
-        provider_user_id="google-sub-logout",
+def test_logout_returns_success_message(db_session, owner):
+    assert auth_routes.logout(owner, db_session) == {
+        "message": "Logged out successfully",
+    }
+
+
+def test_logout_cancels_waiting_online_rooms(db_session, owner):
+    service = OnlineRoomService(db_session)
+    room = service.create_room(
+        owner,
+        CreateOnlineRoomRequest(game_type=GameType.X01, game_variant=301),
     )
 
-    assert auth_routes.logout(user) == {"message": "Logged out successfully"}
+    auth_routes.logout(owner, db_session)
+
+    assert (
+        service.get_room(room.room_code, owner.id).status
+        == OnlineRoomStatus.CANCELLED
+    )

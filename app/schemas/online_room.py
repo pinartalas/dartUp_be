@@ -37,6 +37,10 @@ class JoinOnlineRoomRequest(BaseModel):
     player_name: Optional[str] = Field(None, min_length=1, max_length=100)
 
 
+class OnlineRoomCleanupResponse(BaseModel):
+    cancelled_count: int
+
+
 class OnlineRoomResponse(BaseModel):
     id: int
     room_uuid: str
