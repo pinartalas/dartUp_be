@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.core.deps import get_current_user, get_db
@@ -52,6 +53,14 @@ def social_login(request: SocialLoginRequest, db: Session = Depends(get_db)):
             "user": existing_user,
         }
 
+    if email:
+        conflicting_user = db.query(User).filter(User.email == email).first()
+        if conflicting_user:
+            raise HTTPException(
+                status_code=409,
+                detail="Email is already registered with a different sign-in provider",
+            )
+
     new_user = User(
         email=email,
         full_name=display_name,
@@ -59,7 +68,14 @@ def social_login(request: SocialLoginRequest, db: Session = Depends(get_db)):
         provider_user_id=provider_user_id,
     )
     db.add(new_user)
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=409,
+            detail="Email is already registered with a different sign-in provider",
+        ) from exc
     db.refresh(new_user)
 
     access_token = create_access_token(new_user.id)

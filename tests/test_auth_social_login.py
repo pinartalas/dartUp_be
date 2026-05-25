@@ -1,4 +1,5 @@
 import pytest
+from fastapi import HTTPException
 from pydantic import ValidationError
 
 from app.api.routes import auth as auth_routes
@@ -72,6 +73,40 @@ def test_google_social_login_finds_existing_user_by_verified_sub(
 
     assert response["user"].id == existing_user.id
     assert db_session.query(User).filter(User.auth_provider == "google").count() == 1
+
+
+def test_google_social_login_returns_conflict_when_email_belongs_to_apple_user(
+    db_session,
+    monkeypatch,
+):
+    existing_user = User(
+        email="same@example.com",
+        full_name="Apple User",
+        auth_provider="apple",
+        provider_user_id="apple-sub-123",
+    )
+    db_session.add(existing_user)
+    db_session.commit()
+
+    monkeypatch.setattr(
+        auth_routes,
+        "verify_google_id_token",
+        lambda _: GoogleIdentity(
+            provider_user_id="google-sub-123",
+            email="same@example.com",
+            display_name="Google User",
+        ),
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        auth_routes.social_login(
+            SocialLoginRequest(provider="google", id_token="valid-id-token"),
+            db_session,
+        )
+
+    assert exc_info.value.status_code == 409
+    assert "different sign-in provider" in exc_info.value.detail
+    assert db_session.query(User).count() == 1
 
 
 def test_google_social_login_requires_id_token():
