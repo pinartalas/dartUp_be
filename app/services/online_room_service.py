@@ -196,6 +196,17 @@ class OnlineRoomService:
         *,
         for_update: bool = False,
     ) -> OnlineRoom:
+        if for_update:
+            room = (
+                self.db.query(OnlineRoom)
+                .filter(OnlineRoom.room_code == room_code.upper())
+                .with_for_update()
+                .first()
+            )
+            if room is None:
+                raise OnlineRoomError("Room not found", status_code=404)
+            return self._load_room(room.id)
+
         query = (
             self.db.query(OnlineRoom)
             .options(
@@ -206,8 +217,6 @@ class OnlineRoomService:
             )
             .filter(OnlineRoom.room_code == room_code.upper())
         )
-        if for_update:
-            query = query.with_for_update()
 
         room = query.first()
         if room is None:
