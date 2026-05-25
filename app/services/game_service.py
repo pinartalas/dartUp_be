@@ -24,7 +24,13 @@ class GameService:
         self.state_service = GameStateService()
         self.bot_service = DartBotService()
 
-    def create_game(self, owner: User, request: CreateGameRequest) -> Game:
+    def create_game(
+        self,
+        owner: User,
+        request: CreateGameRequest,
+        *,
+        commit: bool = True,
+    ) -> Game:
         scoring = get_scoring_service(request.game_type.value)
         settings = self._serialize_settings(request)
 
@@ -69,22 +75,25 @@ class GameService:
         starting_player = players[request.starting_player]
         game.current_player_id = starting_player.id
 
-        self.db.commit()
+        if commit:
+            self.db.commit()
+        else:
+            self.db.flush()
         return self._load_game(game.id)
 
-    def get_game(self, game_id: int, owner_id: int) -> Game:
+    def get_game(self, game_id: int, user_id: int) -> Game:
         game = self._load_game(game_id)
-        self._assert_owner(game, owner_id)
+        self._assert_can_access_game(game, user_id)
         return game
 
     def submit_turn(
         self,
         game_id: int,
-        owner_id: int,
+        user_id: int,
         request: SubmitTurnRequest,
     ) -> SubmitTurnResponse:
         game = self._load_game(game_id)
-        self._assert_owner(game, owner_id)
+        self._assert_can_access_game(game, user_id)
 
         if game.status != "active":
             raise GameServiceError("Game is already finished", status_code=400)
@@ -98,12 +107,17 @@ class GameService:
                 "Use bot-turn endpoint for bot players",
                 status_code=400,
             )
+        if self._is_online_game(game) and active_player.user_id != user_id:
+            raise GameServiceError(
+                "You can only submit turns for your online player",
+                status_code=403,
+            )
 
         return self._process_turn(game, active_player, request.throws)
 
-    def submit_bot_turn(self, game_id: int, owner_id: int) -> SubmitTurnResponse:
+    def submit_bot_turn(self, game_id: int, user_id: int) -> SubmitTurnResponse:
         game = self._load_game(game_id)
-        self._assert_owner(game, owner_id)
+        self._assert_can_access_game(game, user_id)
 
         if game.status != "active":
             raise GameServiceError("Game is already finished", status_code=400)
@@ -234,9 +248,17 @@ class GameService:
         return game
 
     @staticmethod
-    def _assert_owner(game: Game, owner_id: int) -> None:
-        if game.owner_id != owner_id:
-            raise GameServiceError("Not allowed to access this game", status_code=403)
+    def _assert_can_access_game(game: Game, user_id: int) -> None:
+        if game.owner_id == user_id:
+            return
+        if any(player.user_id == user_id for player in game.players):
+            return
+        raise GameServiceError("Not allowed to access this game", status_code=403)
+
+    @staticmethod
+    def _is_online_game(game: Game) -> bool:
+        online_settings = (game.settings or {}).get("online")
+        return bool(online_settings and online_settings.get("room_id"))
 
     @staticmethod
     def _get_player(game: Game, player_id: int) -> GamePlayer:

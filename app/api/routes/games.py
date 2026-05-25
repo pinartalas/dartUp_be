@@ -13,6 +13,8 @@ from app.schemas.game import (
 )
 from app.services.game_service import GameService
 from app.services.game_state_service import GameStateService
+from app.services.online_room_service import OnlineRoomService
+from app.services.realtime_service import game_connection_manager
 
 router = APIRouter(prefix="/games", tags=["games"])
 
@@ -53,7 +55,7 @@ def get_game(
 
 
 @router.post("/{game_id}/turns", response_model=SubmitTurnResponse)
-def submit_turn(
+async def submit_turn(
     game_id: int,
     request: SubmitTurnRequest,
     db: Session = Depends(get_db),
@@ -61,22 +63,38 @@ def submit_turn(
 ):
     service = GameService(db)
     try:
-        return service.submit_turn(game_id, current_user.id, request)
+        result = service.submit_turn(game_id, current_user.id, request)
     except GameServiceError as exc:
         _handle_service_error(exc)
 
+    OnlineRoomService(db).mark_finished_if_game_finished(game_id, result.is_finished)
+    await game_connection_manager.send_to_game(
+        game_id,
+        "turn_submitted",
+        result,
+    )
+    return result
+
 
 @router.post("/{game_id}/bot-turn", response_model=SubmitTurnResponse)
-def submit_bot_turn(
+async def submit_bot_turn(
     game_id: int,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     service = GameService(db)
     try:
-        return service.submit_bot_turn(game_id, current_user.id)
+        result = service.submit_bot_turn(game_id, current_user.id)
     except GameServiceError as exc:
         _handle_service_error(exc)
+
+    OnlineRoomService(db).mark_finished_if_game_finished(game_id, result.is_finished)
+    await game_connection_manager.send_to_game(
+        game_id,
+        "turn_submitted",
+        result,
+    )
+    return result
 
 
 @router.get("/{game_id}/stats", response_model=GameStatsResponse)

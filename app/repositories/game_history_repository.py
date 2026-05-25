@@ -1,10 +1,10 @@
 from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import func
+from sqlalchemy import func, or_
 from sqlalchemy.orm import Session, joinedload
 
-from app.models.game import Game
+from app.models.game import Game, GamePlayer
 from app.schemas.game import GameStatus
 
 
@@ -32,7 +32,7 @@ class GameHistoryRepository:
             game_mode=game_mode,
             status=status,
         )
-        return query.with_entities(func.count(Game.id)).scalar() or 0
+        return query.with_entities(func.count(func.distinct(Game.id))).scalar() or 0
 
     def list_finished_games(
         self,
@@ -75,11 +75,14 @@ class GameHistoryRepository:
         game_mode: Optional[int] = None,
         status: Optional[str] = None,
     ):
-        query = self.db.query(Game).filter(
-            Game.owner_id == owner_id,
+        query = self.db.query(Game).outerjoin(
+            GamePlayer,
+            GamePlayer.game_id == Game.id,
+        ).filter(
+            or_(Game.owner_id == owner_id, GamePlayer.user_id == owner_id),
             Game.status == GameStatus.FINISHED.value,
             Game.finished_at.isnot(None),
-        )
+        ).distinct()
 
         if status is not None:
             query = query.filter(Game.status == status)
