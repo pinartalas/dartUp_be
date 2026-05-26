@@ -6,8 +6,9 @@ from pydantic import ValidationError
 from sqlalchemy.orm import Session
 
 from app.core.deps import get_current_user, get_db
-from app.core.exceptions import GameHistoryError
+from app.core.exceptions import GameHistoryError, ProfileError
 from app.models.user import User
+from app.schemas.auth import ProfileUpdateRequest, UserResponse
 from app.schemas.game import GameStatus, GameType
 from app.schemas.game_history import (
     GameHistoryListResponse,
@@ -15,12 +16,30 @@ from app.schemas.game_history import (
     HistoryPeriod,
 )
 from app.services.game_history_service import GameHistoryService
+from app.services.profile_service import ProfileService
 
 router = APIRouter(prefix="/users", tags=["users"])
 
 
 def _handle_history_error(exc: GameHistoryError) -> None:
     raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
+
+
+def _handle_profile_error(exc: ProfileError) -> None:
+    raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
+
+
+@router.patch("/me/profile", response_model=UserResponse)
+def update_my_profile(
+    request: ProfileUpdateRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    service = ProfileService(db)
+    try:
+        return service.update_profile(current_user, request)
+    except ProfileError as exc:
+        _handle_profile_error(exc)
 
 
 @router.get("/me/game-history", response_model=GameHistoryListResponse)

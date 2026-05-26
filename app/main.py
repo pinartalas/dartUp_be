@@ -10,6 +10,7 @@ from app.api.routes import (
 )
 from app.core.config import CORS_ORIGINS
 from app.core.request_logging import install_request_logging
+from app.db.schema_updates import ensure_user_profile_columns
 from app.db.session import Base, engine
 import app.models  # noqa: F401 — register ORM models with Base
 
@@ -26,6 +27,7 @@ if CORS_ORIGINS:
     )
 
 Base.metadata.create_all(bind=engine)
+ensure_user_profile_columns(engine)
 
 app.include_router(auth_router)
 app.include_router(games_router)

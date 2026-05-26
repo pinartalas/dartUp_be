@@ -1,6 +1,7 @@
+from datetime import datetime
 from typing import Optional
 
-from pydantic import BaseModel, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 class SocialLoginRequest(BaseModel):
@@ -25,10 +26,55 @@ class UserResponse(BaseModel):
     id: int
     email: str | None = None
     full_name: str | None = None
+    username: str | None = None
+    profile_photo_url: str | None = None
+    username_changed_at: datetime | None = None
     auth_provider: str
     provider_user_id: str
 
     model_config = {"from_attributes": True}
+
+
+class ProfileUpdateRequest(BaseModel):
+    username: str | None = Field(
+        None,
+        min_length=3,
+        max_length=30,
+        pattern=r"^[A-Za-z0-9_]+$",
+    )
+    profile_photo_url: str | None = Field(None, max_length=2048)
+
+    @field_validator("username", mode="before")
+    @classmethod
+    def normalize_username(cls, value: object) -> object:
+        if value is None:
+            return None
+        if not isinstance(value, str):
+            return value
+
+        normalized = value.strip().lower()
+        if not normalized:
+            raise ValueError("username must not be empty")
+        return normalized
+
+    @field_validator("profile_photo_url", mode="before")
+    @classmethod
+    def normalize_profile_photo_url(cls, value: object) -> object:
+        if value is None:
+            return None
+        if not isinstance(value, str):
+            return value
+
+        normalized = value.strip()
+        return normalized or None
+
+    @model_validator(mode="after")
+    def validate_update_fields(self) -> "ProfileUpdateRequest":
+        if not self.model_fields_set:
+            raise ValueError("at least one profile field is required")
+        if "username" in self.model_fields_set and self.username is None:
+            raise ValueError("username cannot be null")
+        return self
 
 
 class AuthResponse(BaseModel):
