@@ -9,6 +9,9 @@ from app.schemas.game import (
     GameType,
     PlayerCreateInput,
     SubmitTurnRequest,
+    GameSettings,
+    MatchMode,
+    MatchSettings,
 )
 from app.schemas.online_room import (
     CreateOnlineRoomRequest,
@@ -182,3 +185,91 @@ def test_online_game_turns_must_match_authenticated_player(
             owner.id,
             SubmitTurnRequest(player_id=guest_player.id, throws=throws),
         )
+
+def test_online_room_stays_active_between_legs_until_match_finished(
+    db_session,
+    owner,
+    other_user,
+):
+    room_service = OnlineRoomService(db_session)
+    room = room_service.create_room(
+        owner,
+        CreateOnlineRoomRequest(
+            game_type=GameType.X01,
+            game_variant=301,
+            settings=GameSettings(
+                match=MatchSettings(mode=MatchMode.LEGS, target_wins=2),
+            ),
+        ),
+    )
+    joined = room_service.join_room(
+        room.room_code,
+        other_user,
+        JoinOnlineRoomRequest(),
+    )
+    assert joined.game is not None
+
+    host_player_id = joined.game.players[0].id
+    guest_player_id = joined.game.players[1].id
+
+    score_180 = [
+        DartThrowInput(segment="20", multiplier=3),
+        DartThrowInput(segment="20", multiplier=3),
+        DartThrowInput(segment="20", multiplier=3),
+    ]
+    finish_121 = [
+        DartThrowInput(segment="20", multiplier=3),
+        DartThrowInput(segment="20", multiplier=3),
+        DartThrowInput(segment="1", multiplier=1),
+    ]
+    miss_turn = [
+        DartThrowInput(segment="miss", multiplier=1),
+        DartThrowInput(segment="miss", multiplier=1),
+        DartThrowInput(segment="miss", multiplier=1),
+    ]
+
+    game_service = GameService(db_session)
+
+    game_service.submit_turn(
+        joined.game.id,
+        owner.id,
+        SubmitTurnRequest(player_id=host_player_id, throws=score_180),
+    )
+    game_service.submit_turn(
+        joined.game.id,
+        other_user.id,
+        SubmitTurnRequest(player_id=guest_player_id, throws=miss_turn),
+    )
+    first_leg = game_service.submit_turn(
+        joined.game.id,
+        owner.id,
+        SubmitTurnRequest(player_id=host_player_id, throws=finish_121),
+    )
+    room_service.mark_finished_if_game_finished(joined.game.id, first_leg.is_finished)
+
+    assert first_leg.is_finished is False
+    assert room_service.get_room(room.room_code, owner.id).status == OnlineRoomStatus.ACTIVE
+    assert first_leg.game.settings["match"]["hand_wins"][str(host_player_id)] == 1
+
+    game_service.submit_turn(
+        joined.game.id,
+        owner.id,
+        SubmitTurnRequest(player_id=host_player_id, throws=score_180),
+    )
+    game_service.submit_turn(
+        joined.game.id,
+        other_user.id,
+        SubmitTurnRequest(player_id=guest_player_id, throws=miss_turn),
+    )
+    final_leg = game_service.submit_turn(
+        joined.game.id,
+        owner.id,
+        SubmitTurnRequest(player_id=host_player_id, throws=finish_121),
+    )
+    room_service.mark_finished_if_game_finished(joined.game.id, final_leg.is_finished)
+
+    assert final_leg.is_finished is True
+    assert final_leg.winner is not None
+    assert final_leg.winner.player_id == host_player_id
+    assert final_leg.game.settings["match"]["hand_wins"][str(host_player_id)] == 2
+    assert room_service.get_room(room.room_code, owner.id).status == OnlineRoomStatus.FINISHED

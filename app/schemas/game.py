@@ -19,10 +19,25 @@ class X01Settings(BaseModel):
     double_out: bool = False
     double_in: bool = False
 
+class MatchMode(str, Enum):
+    OFF = "off"
+    LEGS = "legs"
+
+class MatchSettings(BaseModel):
+    mode: MatchMode = MatchMode.OFF
+    target_wins: Optional[int] = Field(None, ge=2)
+
+    @model_validator(mode="after")
+    def validate_match_settings(self) -> "MatchSettings":
+        if self.mode == MatchMode.LEGS and self.target_wins is None:
+            raise ValueError("legs match mode requires target_wins")
+        if self.mode == MatchMode.OFF and self.target_wins is not None:
+            raise ValueError("off match mode must not set target_wins")
+        return self
 
 class GameSettings(BaseModel):
     x01: Optional[X01Settings] = None
-
+    match: Optional[MatchSettings] = None
 
 class BotDifficulty(str, Enum):
     EASY = "easy"

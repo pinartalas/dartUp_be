@@ -195,7 +195,7 @@ class GameService:
         next_player_id: Optional[int] = None
 
         if result.is_finished and result.winner_player_id:
-            self._finish_game(game, result.winner_player_id)
+            next_player_id = self._handle_finished_leg(game, result.winner_player_id)
         else:
             next_player = self._next_player(game, active_player)
             game.current_player_id = next_player.id
@@ -226,6 +226,57 @@ class GameService:
         game.current_player_id = None
         for player in game.players:
             player.is_winner = player.id == winner_player_id
+
+    def _handle_finished_leg(self, game: Game, leg_winner_player_id: int) -> Optional[int]:
+        settings = dict(game.settings or {})
+        match_settings = dict(settings.get("match", {}))
+
+        if match_settings.get("mode") != "legs":
+            self._finish_game(game, leg_winner_player_id)
+            return None
+
+        target_wins = match_settings.get("target_wins")
+        if not target_wins:
+            self._finish_game(game, leg_winner_player_id)
+            return None
+        
+        hand_wins = {
+            str(player.id): int(match_settings.get("hand_wins", {}).get(str(player.id), 0))
+            for player in game.players
+        }
+
+        winner_key = str(leg_winner_player_id)
+        hand_wins[winner_key] = hand_wins.get(winner_key, 0) + 1
+
+        match_settings["hand_wins"] = hand_wins
+        match_settings["last_hand_winner_id"] = leg_winner_player_id
+        match_settings["current_hand"] = int(match_settings.get("current_hand", 1)) + 1
+
+        settings["match"] = match_settings
+        game.settings = settings
+
+        if hand_wins[winner_key] >= target_wins:
+            self._finish_game(game, leg_winner_player_id)
+            return None
+        return self._reset_players_for_next_leg(game, leg_winner_player_id)
+
+    def _reset_players_for_next_leg(self, game: Game, leg_winner_player_id: int) -> int:
+        scoring = get_scoring_service(game.game_type)
+
+        for player in game.players:
+            state = scoring.create_initial_player_state(
+                player_id=player.id,
+                name=player.name,
+                player_order=player.player_order,
+                game_variant=game.game_variant,
+                settings=game.settings or {},
+            )
+            self._apply_state_to_player(player, state, game.game_type)
+            player.is_winner = False
+
+        starting_player = self._get_player(game, leg_winner_player_id)
+        game.current_player_id = starting_player.id
+        return starting_player.id
 
     @staticmethod
     def _next_player(game: Game, current: GamePlayer) -> GamePlayer:
@@ -271,9 +322,15 @@ class GameService:
     def _serialize_settings(request: CreateGameRequest) -> dict[str, Any]:
         if request.settings is None:
             return {}
+
         data = request.settings.model_dump(exclude_none=True)
+
         if request.settings.x01:
             data["x01"] = request.settings.x01.model_dump()
+
+        if request.settings.match:
+            data["match"] = request.settings.match.model_dump()
+
         return data
 
     @staticmethod

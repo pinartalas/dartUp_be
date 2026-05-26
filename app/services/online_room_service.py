@@ -292,9 +292,15 @@ class OnlineRoomService:
     def _serialize_settings(settings) -> dict:
         if settings is None:
             return {}
+
         data = settings.model_dump(exclude_none=True)
+
         if settings.x01:
             data["x01"] = settings.x01.model_dump()
+        
+        if settings.match:
+            data["match"] = settings.match.model_dump()
+            
         return data
 
     @staticmethod
