@@ -98,6 +98,49 @@ async def submit_bot_turn(
     return result
 
 
+@router.post("/{game_id}/legs/continue", response_model=GameStateResponse)
+async def continue_next_leg(
+    game_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    service = GameService(db)
+    try:
+        game = service.continue_next_leg(game_id, current_user.id)
+    except GameServiceError as exc:
+        _handle_service_error(exc)
+
+    state = GameStateService().build_game_state(game)
+    await game_connection_manager.send_to_game(
+        game_id,
+        "next_leg_started",
+        state,
+    )
+    return state
+
+
+@router.post("/{game_id}/legs/cancel", response_model=GameStateResponse)
+async def cancel_next_leg(
+    game_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    service = GameService(db)
+    try:
+        game = service.cancel_next_leg(game_id, current_user.id)
+    except GameServiceError as exc:
+        _handle_service_error(exc)
+
+    state = GameStateService().build_game_state(game)
+    OnlineRoomService(db).mark_finished_if_game_finished(game_id, state.is_finished)
+    await game_connection_manager.send_to_game(
+        game_id,
+        "match_cancelled",
+        state,
+    )
+    return state
+
+
 @router.get("/{game_id}/stats", response_model=GameStatsResponse)
 def get_game_stats(
     game_id: int,

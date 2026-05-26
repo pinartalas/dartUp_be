@@ -249,7 +249,13 @@ def test_online_room_stays_active_between_legs_until_match_finished(
 
     assert first_leg.is_finished is False
     assert room_service.get_room(room.room_code, owner.id).status == OnlineRoomStatus.ACTIVE
+    assert first_leg.game.current_player_id is None
+    assert first_leg.game.settings["match"]["pending_next_leg"] is True
     assert first_leg.game.settings["match"]["hand_wins"][str(host_player_id)] == 1
+
+    continued = game_service.continue_next_leg(joined.game.id, owner.id)
+    assert continued.current_player_id == host_player_id
+    assert continued.settings["match"]["pending_next_leg"] is False
 
     game_service.submit_turn(
         joined.game.id,

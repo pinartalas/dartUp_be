@@ -74,6 +74,7 @@ class GameService:
 
         starting_player = players[request.starting_player]
         game.current_player_id = starting_player.id
+        self._initialize_match_state(game, players)
 
         if commit:
             self.db.commit()
@@ -97,6 +98,9 @@ class GameService:
 
         if game.status != "active":
             raise GameServiceError("Game is already finished", status_code=400)
+
+        if self._is_waiting_for_next_leg(game):
+            raise GameServiceError("Next leg has not started yet", status_code=400)
 
         if game.current_player_id != request.player_id:
             raise GameServiceError("It is not this player's turn", status_code=400)
@@ -122,6 +126,9 @@ class GameService:
         if game.status != "active":
             raise GameServiceError("Game is already finished", status_code=400)
 
+        if self._is_waiting_for_next_leg(game):
+            raise GameServiceError("Next leg has not started yet", status_code=400)
+
         if game.current_player_id is None:
             raise GameServiceError("No active player", status_code=400)
 
@@ -131,6 +138,54 @@ class GameService:
 
         throws = self.bot_service.generate_turn(game, bot_player)
         return self._process_turn(game, bot_player, throws)
+
+    def continue_next_leg(self, game_id: int, user_id: int) -> Game:
+        game = self._load_game(game_id)
+        self._assert_can_access_game(game, user_id)
+
+        if game.status != "active":
+            raise GameServiceError("Game is already finished", status_code=400)
+
+        settings = dict(game.settings or {})
+        match_settings = dict(settings.get("match") or {})
+        if not self._is_waiting_for_next_leg(game):
+            raise GameServiceError("Game is not waiting for next leg", status_code=400)
+
+        last_winner_id = match_settings.get("last_hand_winner_id")
+        if last_winner_id is None:
+            raise GameServiceError("Last leg winner is missing", status_code=400)
+
+        match_settings["pending_next_leg"] = False
+        match_settings["current_hand"] = int(match_settings.get("current_hand", 1)) + 1
+        match_settings["current_hand_started_turn"] = game.turn_sequence + 1
+        settings["match"] = match_settings
+        game.settings = settings
+
+        self._reset_players_for_next_leg(game, int(last_winner_id))
+        self.db.commit()
+        return self._load_game(game.id)
+
+    def cancel_next_leg(self, game_id: int, user_id: int) -> Game:
+        game = self._load_game(game_id)
+        self._assert_can_access_game(game, user_id)
+
+        if game.status != "active":
+            raise GameServiceError("Game is already finished", status_code=400)
+
+        settings = dict(game.settings or {})
+        match_settings = dict(settings.get("match") or {})
+        if not self._is_waiting_for_next_leg(game):
+            raise GameServiceError("Game is not waiting for next leg", status_code=400)
+
+        winner_player_id = self._match_leader_player_id(game, match_settings)
+        match_settings["pending_next_leg"] = False
+        match_settings["cancelled_after_hand"] = match_settings.get("current_hand", 1)
+        settings["match"] = match_settings
+        game.settings = settings
+
+        self._finish_game(game, winner_player_id)
+        self.db.commit()
+        return self._load_game(game.id)
 
     def _process_turn(
         self,
@@ -250,7 +305,10 @@ class GameService:
 
         match_settings["hand_wins"] = hand_wins
         match_settings["last_hand_winner_id"] = leg_winner_player_id
-        match_settings["current_hand"] = int(match_settings.get("current_hand", 1)) + 1
+        match_settings["completed_legs"] = [
+            *match_settings.get("completed_legs", []),
+            self._build_completed_leg_summary(game, leg_winner_player_id, match_settings),
+        ]
 
         settings["match"] = match_settings
         game.settings = settings
@@ -258,7 +316,12 @@ class GameService:
         if hand_wins[winner_key] >= target_wins:
             self._finish_game(game, leg_winner_player_id)
             return None
-        return self._reset_players_for_next_leg(game, leg_winner_player_id)
+
+        match_settings["pending_next_leg"] = True
+        settings["match"] = match_settings
+        game.settings = settings
+        game.current_player_id = None
+        return None
 
     def _reset_players_for_next_leg(self, game: Game, leg_winner_player_id: int) -> int:
         scoring = get_scoring_service(game.game_type)
@@ -277,6 +340,101 @@ class GameService:
         starting_player = self._get_player(game, leg_winner_player_id)
         game.current_player_id = starting_player.id
         return starting_player.id
+
+    @staticmethod
+    def _initialize_match_state(game: Game, players: list[GamePlayer]) -> None:
+        settings = dict(game.settings or {})
+        match_settings = dict(settings.get("match") or {})
+        if match_settings.get("mode") != "legs":
+            return
+
+        match_settings.setdefault("current_hand", 1)
+        match_settings.setdefault("current_hand_started_turn", 1)
+        match_settings.setdefault("pending_next_leg", False)
+        match_settings.setdefault("completed_legs", [])
+        match_settings.setdefault(
+            "hand_wins",
+            {str(player.id): 0 for player in players},
+        )
+        settings["match"] = match_settings
+        game.settings = settings
+
+    @staticmethod
+    def _is_waiting_for_next_leg(game: Game) -> bool:
+        match_settings = (game.settings or {}).get("match") or {}
+        return bool(match_settings.get("pending_next_leg"))
+
+    def _build_completed_leg_summary(
+        self,
+        game: Game,
+        leg_winner_player_id: int,
+        match_settings: dict[str, Any],
+    ) -> dict[str, Any]:
+        hand_number = int(match_settings.get("current_hand", 1))
+        started_turn = int(match_settings.get("current_hand_started_turn", 1))
+        ended_turn = game.turn_sequence
+        turns = (
+            self.db.query(Turn)
+            .filter(
+                Turn.game_id == game.id,
+                Turn.turn_number >= started_turn,
+                Turn.turn_number <= ended_turn,
+            )
+            .order_by(Turn.turn_number)
+            .all()
+        )
+
+        players_summary = []
+        for player in sorted(game.players, key=lambda p: p.player_order):
+            player_turns = [turn for turn in turns if turn.player_id == player.id]
+            scored_values = [
+                turn.points_scored
+                if turn.points_scored is not None
+                else (0 if turn.is_bust else turn.turn_score)
+                for turn in player_turns
+            ]
+            turn_count = len(player_turns)
+            total_scored = sum(scored_values)
+            players_summary.append(
+                {
+                    "player_id": player.id,
+                    "name": player.name,
+                    "turn_count": turn_count,
+                    "darts_thrown": turn_count * 3,
+                    "points_scored": total_scored,
+                    "average_per_turn": (
+                        round(total_scored / turn_count, 2) if turn_count else None
+                    ),
+                    "highest_turn_score": max(scored_values, default=0),
+                    "bust_count": sum(1 for turn in player_turns if turn.is_bust),
+                    "current_score": player.current_score,
+                    "cricket_state": player.cricket_state,
+                }
+            )
+
+        return {
+            "hand": hand_number,
+            "winner_player_id": leg_winner_player_id,
+            "started_turn": started_turn,
+            "ended_turn": ended_turn,
+            "players": players_summary,
+        }
+
+    @staticmethod
+    def _match_leader_player_id(game: Game, match_settings: dict[str, Any]) -> int:
+        hand_wins = {
+            str(player.id): int(match_settings.get("hand_wins", {}).get(str(player.id), 0))
+            for player in game.players
+        }
+        last_winner_id = match_settings.get("last_hand_winner_id")
+        leader_key = max(
+            hand_wins,
+            key=lambda player_id: (
+                hand_wins[player_id],
+                player_id == str(last_winner_id),
+            ),
+        )
+        return int(leader_key)
 
     @staticmethod
     def _next_player(game: Game, current: GamePlayer) -> GamePlayer:
