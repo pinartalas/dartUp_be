@@ -46,24 +46,40 @@ class GameHistoryRepository:
         offset: int = 0,
         limit: int = 20,
     ) -> list[Game]:
-        query = self._base_query(
-            owner_id,
-            finished_from=finished_from,
-            finished_to=finished_to,
-            game_type=game_type,
-            game_mode=game_mode,
-            status=status,
-        )
-        return (
-            query.options(
-                joinedload(Game.players),
-                joinedload(Game.turns),
+        id_rows = (
+            self._base_query(
+                owner_id,
+                finished_from=finished_from,
+                finished_to=finished_to,
+                game_type=game_type,
+                game_mode=game_mode,
+                status=status,
             )
+            .with_entities(Game.id)
+            .group_by(Game.id)
             .order_by(Game.finished_at.desc(), Game.id.desc())
             .offset(offset)
             .limit(limit)
             .all()
         )
+
+        game_ids = [row[0] for row in id_rows]
+
+        if not game_ids:
+            return []
+
+        games = (
+            self.db.query(Game)
+            .options(
+                joinedload(Game.players),
+                joinedload(Game.turns),
+            )
+            .filter(Game.id.in_(game_ids))
+            .order_by(Game.finished_at.desc(), Game.id.desc())
+            .all()
+        )
+
+        return games
 
     def _base_query(
         self,
@@ -75,14 +91,18 @@ class GameHistoryRepository:
         game_mode: Optional[int] = None,
         status: Optional[str] = None,
     ):
-        query = self.db.query(Game).outerjoin(
-            GamePlayer,
-            GamePlayer.game_id == Game.id,
-        ).filter(
-            or_(Game.owner_id == owner_id, GamePlayer.user_id == owner_id),
-            Game.status == GameStatus.FINISHED.value,
-            Game.finished_at.isnot(None),
-        ).distinct()
+        query = (
+            self.db.query(Game)
+            .outerjoin(
+                GamePlayer,
+                GamePlayer.game_id == Game.id,
+            )
+            .filter(
+                or_(Game.owner_id == owner_id, GamePlayer.user_id == owner_id),
+                Game.status == GameStatus.FINISHED.value,
+                Game.finished_at.isnot(None),
+            )
+        )
 
         if status is not None:
             query = query.filter(Game.status == status)
