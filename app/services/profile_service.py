@@ -23,9 +23,6 @@ class ProfileService:
         if "username" in request.model_fields_set:
             self._update_username(user, request.username)
 
-        if "profile_photo_url" in request.model_fields_set:
-            user.profile_photo_url = request.profile_photo_url
-
         try:
             self.db.commit()
         except IntegrityError as exc:
@@ -34,6 +31,12 @@ class ProfileService:
 
         self.db.refresh(user)
         return user
+
+    def update_profile_photo(self, user: User, profile_photo_url: str) -> str:
+        user.profile_photo_url = profile_photo_url
+        self.db.commit()
+        self.db.refresh(user)
+        return profile_photo_url
 
     def _update_username(self, user: User, username: str | None) -> None:
         if username is None or username == user.username:

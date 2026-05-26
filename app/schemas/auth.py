@@ -42,7 +42,6 @@ class ProfileUpdateRequest(BaseModel):
         max_length=30,
         pattern=r"^[A-Za-z0-9_]+$",
     )
-    profile_photo_url: str | None = Field(None, max_length=2048)
 
     @field_validator("username", mode="before")
     @classmethod
@@ -57,17 +56,6 @@ class ProfileUpdateRequest(BaseModel):
             raise ValueError("username must not be empty")
         return normalized
 
-    @field_validator("profile_photo_url", mode="before")
-    @classmethod
-    def normalize_profile_photo_url(cls, value: object) -> object:
-        if value is None:
-            return None
-        if not isinstance(value, str):
-            return value
-
-        normalized = value.strip()
-        return normalized or None
-
     @model_validator(mode="after")
     def validate_update_fields(self) -> "ProfileUpdateRequest":
         if not self.model_fields_set:
@@ -75,6 +63,10 @@ class ProfileUpdateRequest(BaseModel):
         if "username" in self.model_fields_set and self.username is None:
             raise ValueError("username cannot be null")
         return self
+
+
+class ProfilePhotoUploadResponse(BaseModel):
+    profile_photo_url: str
 
 
 class AuthResponse(BaseModel):

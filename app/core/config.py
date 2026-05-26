@@ -1,4 +1,5 @@
 import os
+from pathlib import Path
 
 
 def _normalize_database_url(url: str) -> str:
@@ -22,6 +23,11 @@ GOOGLE_CLIENT_IDS = tuple(
     client_id.strip()
     for client_id in os.getenv("GOOGLE_CLIENT_IDS", "").split(",")
     if client_id.strip()
+)
+UPLOADS_DIR = Path(os.getenv("UPLOADS_DIR", "uploads"))
+PROFILE_PHOTO_UPLOAD_DIR = UPLOADS_DIR / "profile-photos"
+PROFILE_PHOTO_MAX_BYTES = int(
+    os.getenv("PROFILE_PHOTO_MAX_BYTES", str(5 * 1024 * 1024))
 )
 
 CRICKET_SEGMENTS = ("15", "16", "17", "18", "19", "20", "bull")

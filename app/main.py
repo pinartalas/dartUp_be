@@ -1,5 +1,6 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 
 from app.api.routes import (
     auth_router,
@@ -8,7 +9,7 @@ from app.api.routes import (
     request_logs_router,
     users_router,
 )
-from app.core.config import CORS_ORIGINS
+from app.core.config import CORS_ORIGINS, UPLOADS_DIR
 from app.core.request_logging import install_request_logging
 from app.db.schema_updates import ensure_user_profile_columns
 from app.db.session import Base, engine
@@ -28,6 +29,8 @@ if CORS_ORIGINS:
 
 Base.metadata.create_all(bind=engine)
 ensure_user_profile_columns(engine)
+UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
+app.mount("/uploads", StaticFiles(directory=UPLOADS_DIR), name="uploads")
 
 app.include_router(auth_router)
 app.include_router(games_router)
