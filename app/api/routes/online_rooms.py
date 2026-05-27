@@ -1,3 +1,4 @@
+import json
 from typing import Annotated, Optional
 
 from fastapi import (
@@ -19,12 +20,15 @@ from app.models.user import User
 from app.schemas.online_room import (
     CreateOnlineRoomRequest,
     JoinOnlineRoomRequest,
+    LeaveOnlineGameRequest,
+    OnlineGameLeaveResponse,
     OnlineRoomCleanupResponse,
     OnlineRoomListResponse,
     OnlineRoomResponse,
 )
 from app.services.game_service import GameService
 from app.services.online_room_service import OnlineRoomService
+from app.services.online_presence_service import OnlinePresenceService, PresenceEvent
 from app.services.realtime_service import game_connection_manager
 
 router = APIRouter(prefix="/online-rooms", tags=["online-rooms"])
@@ -36,6 +40,30 @@ def _handle_online_room_error(exc: OnlineRoomError) -> None:
 
 def _handle_game_service_error(exc: GameServiceError) -> None:
     raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
+
+
+async def _broadcast_presence_events(events: list[PresenceEvent]) -> None:
+    for event in events:
+        await game_connection_manager.send_to_game(
+            event.game_id,
+            event.event_type,
+            event.payload,
+            exclude_user_id=event.exclude_user_id,
+        )
+
+
+def _is_heartbeat_message(message: str) -> bool:
+    if message in {"heartbeat", "ping"}:
+        return True
+    try:
+        data = json.loads(message)
+    except json.JSONDecodeError:
+        return False
+    if isinstance(data, str):
+        return data in {"heartbeat", "ping"}
+    if not isinstance(data, dict):
+        return False
+    return data.get("type") in {"heartbeat", "ping"}
 
 
 @router.post(
@@ -124,6 +152,26 @@ def cancel_online_room(
         _handle_online_room_error(exc)
 
 
+@router.post("/games/{game_id}/leave", response_model=OnlineGameLeaveResponse)
+async def leave_online_game(
+    game_id: int,
+    request: LeaveOnlineGameRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    try:
+        result = OnlinePresenceService(db).leave_game(
+            game_id,
+            current_user.id,
+            request.reason.value,
+        )
+    except OnlineRoomError as exc:
+        _handle_online_room_error(exc)
+
+    await _broadcast_presence_events(result.events)
+    return result.response
+
+
 @router.websocket("/games/{game_id}/ws")
 async def watch_online_game(
     websocket: WebSocket,
@@ -137,15 +185,30 @@ async def watch_online_game(
     db = SessionLocal()
     try:
         user_id = decode_access_token(token)
-        game = GameService(db).get_game(game_id, user_id)
-        initial_state = GameService(db).state_service.build_game_state(game)
+        GameService(db).get_game(game_id, user_id)
     except (HTTPException, GameServiceError):
         await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
         return
     finally:
         db.close()
 
-    await game_connection_manager.connect(game_id, websocket)
+    await game_connection_manager.connect(game_id, user_id, websocket)
+
+    db = SessionLocal()
+    try:
+        reconnect_event = OnlinePresenceService(db).mark_connected(game_id, user_id)
+        game = GameService(db).get_game(game_id, user_id)
+        initial_state = GameService(db).state_service.build_game_state(game)
+    except (GameServiceError, OnlineRoomError):
+        game_connection_manager.disconnect(game_id, user_id, websocket)
+        await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+        return
+    finally:
+        db.close()
+
+    if reconnect_event is not None:
+        await _broadcast_presence_events([reconnect_event])
+
     await game_connection_manager.send_to_socket(
         websocket,
         "game_state",
@@ -154,6 +217,32 @@ async def watch_online_game(
 
     try:
         while True:
-            await websocket.receive_text()
+            message = await websocket.receive_text()
+            if not _is_heartbeat_message(message):
+                continue
+
+            db = SessionLocal()
+            try:
+                OnlinePresenceService(db).heartbeat(game_id, user_id)
+            finally:
+                db.close()
     except WebSocketDisconnect:
-        game_connection_manager.disconnect(game_id, websocket)
+        should_mark_disconnected = game_connection_manager.disconnect(
+            game_id,
+            user_id,
+            websocket,
+        )
+        if not should_mark_disconnected:
+            return
+
+        db = SessionLocal()
+        try:
+            disconnect_event = OnlinePresenceService(db).mark_disconnected(
+                game_id,
+                user_id,
+            )
+        finally:
+            db.close()
+
+        if disconnect_event is not None:
+            await _broadcast_presence_events([disconnect_event])

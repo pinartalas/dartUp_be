@@ -3,6 +3,7 @@ from typing import Optional
 from app.models.game import Game, GamePlayer, Turn
 from app.schemas.game import (
     CricketStateResponse,
+    ForfeitResponse,
     GameStateResponse,
     GameStatsResponse,
     PlayerStateResponse,
@@ -29,8 +30,9 @@ class GameStateService:
             turn_sequence=game.turn_sequence,
             started_at=game.started_at,
             finished_at=game.finished_at,
-            is_finished=game.status == "finished",
+            is_finished=self._is_terminal_status(game.status),
             winner=winner,
+            forfeit=self._build_forfeit(game),
         )
 
     def build_turn_result(self, turn: Turn) -> TurnResultResponse:
@@ -101,6 +103,11 @@ class GameStateService:
                 total_points_scored=player.total_points_scored,
                 is_winner=player.is_winner,
                 is_active=player.id == game.current_player_id,
+                presence_state=player.presence_state,
+                last_seen_at=player.last_seen_at,
+                disconnected_at=player.disconnected_at,
+                left_at=player.left_at,
+                leave_reason=player.leave_reason,
             )
             for player in sorted(game.players, key=lambda p: p.player_order)
         ]
@@ -127,3 +134,18 @@ class GameStateService:
         if winner is None:
             return None
         return WinnerResponse(player_id=winner.id, name=winner.name)
+
+    @staticmethod
+    def _build_forfeit(game: Game) -> Optional[ForfeitResponse]:
+        forfeit = (game.settings or {}).get("forfeit")
+        if not forfeit:
+            return None
+        player_id = forfeit.get("player_id")
+        reason = forfeit.get("reason")
+        if player_id is None or reason is None:
+            return None
+        return ForfeitResponse(player_id=int(player_id), reason=str(reason))
+
+    @staticmethod
+    def _is_terminal_status(status: str) -> bool:
+        return status in {"finished", "forfeited", "cancelled"}

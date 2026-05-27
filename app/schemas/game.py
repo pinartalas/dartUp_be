@@ -13,6 +13,14 @@ class GameType(str, Enum):
 class GameStatus(str, Enum):
     ACTIVE = "active"
     FINISHED = "finished"
+    FORFEITED = "forfeited"
+    CANCELLED = "cancelled"
+
+
+class PlayerPresenceState(str, Enum):
+    ONLINE = "online"
+    DISCONNECTED = "disconnected"
+    LEFT = "left"
 
 
 class X01Settings(BaseModel):
@@ -140,6 +148,11 @@ class PlayerStateResponse(BaseModel):
     total_points_scored: int
     is_winner: bool
     is_active: bool = False
+    presence_state: PlayerPresenceState = PlayerPresenceState.ONLINE
+    last_seen_at: Optional[datetime] = None
+    disconnected_at: Optional[datetime] = None
+    left_at: Optional[datetime] = None
+    leave_reason: Optional[str] = None
 
     model_config = {"from_attributes": True}
 
@@ -147,6 +160,11 @@ class PlayerStateResponse(BaseModel):
 class WinnerResponse(BaseModel):
     player_id: int
     name: str
+
+
+class ForfeitResponse(BaseModel):
+    player_id: int
+    reason: str
 
 
 class GameStateResponse(BaseModel):
@@ -163,6 +181,7 @@ class GameStateResponse(BaseModel):
     finished_at: Optional[datetime] = None
     is_finished: bool
     winner: Optional[WinnerResponse] = None
+    forfeit: Optional[ForfeitResponse] = None
 
 
 class SubmitTurnResponse(BaseModel):

@@ -104,6 +104,11 @@ class GamePlayer(Base):
     total_darts_thrown = Column(Integer, nullable=False, default=0)
     total_points_scored = Column(Integer, nullable=False, default=0)
     is_winner = Column(Boolean, nullable=False, default=False)
+    presence_state = Column(String(20), nullable=False, default="online", index=True)
+    last_seen_at = Column(DateTime, nullable=True)
+    disconnected_at = Column(DateTime, nullable=True)
+    left_at = Column(DateTime, nullable=True)
+    leave_reason = Column(String(30), nullable=True)
 
     created_at = Column(DateTime, default=datetime.utcnow)
 
