@@ -16,6 +16,14 @@ GAME_PLAYER_PRESENCE_COLUMNS = {
     "leave_reason": "VARCHAR(30)",
 }
 
+ONLINE_ROOM_PRESENCE_COLUMNS = {
+    "host_presence_state": "VARCHAR(20) NOT NULL DEFAULT 'online'",
+    "host_last_seen_at": "TIMESTAMP",
+    "host_disconnected_at": "TIMESTAMP",
+    "host_left_at": "TIMESTAMP",
+    "host_leave_reason": "VARCHAR(30)",
+}
+
 
 def ensure_user_profile_columns(engine: Engine) -> None:
     inspector = inspect(engine)
@@ -64,5 +72,32 @@ def ensure_game_player_presence_columns(engine: Engine) -> None:
             text(
                 "CREATE INDEX IF NOT EXISTS ix_game_players_presence_state "
                 "ON game_players (presence_state)"
+            )
+        )
+
+
+def ensure_online_room_presence_columns(engine: Engine) -> None:
+    inspector = inspect(engine)
+    if not inspector.has_table("online_rooms"):
+        return
+
+    existing_columns = {
+        column["name"] for column in inspector.get_columns("online_rooms")
+    }
+
+    with engine.begin() as connection:
+        for column_name, column_type in ONLINE_ROOM_PRESENCE_COLUMNS.items():
+            if column_name not in existing_columns:
+                connection.execute(
+                    text(
+                        f"ALTER TABLE online_rooms "
+                        f"ADD COLUMN {column_name} {column_type}"
+                    )
+                )
+
+        connection.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_online_rooms_host_presence_state "
+                "ON online_rooms (host_presence_state)"
             )
         )

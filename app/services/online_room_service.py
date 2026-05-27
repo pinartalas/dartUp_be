@@ -1,5 +1,6 @@
 import secrets
 import string
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from sqlalchemy.orm import Session, joinedload
@@ -22,6 +23,12 @@ from app.services.game_state_service import GameStateService
 
 ROOM_CODE_LENGTH = 6
 ROOM_CODE_CHARS = string.ascii_uppercase + string.digits
+ONLINE = "online"
+LEFT = "left"
+
+
+def _utcnow() -> datetime:
+    return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
 class OnlineRoomService:
@@ -44,6 +51,8 @@ class OnlineRoomService:
             game_variant=request.game_variant,
             settings=self._serialize_settings(request.settings),
             status=OnlineRoomStatus.WAITING.value,
+            host_presence_state=ONLINE,
+            host_last_seen_at=_utcnow(),
         )
         self.db.add(room)
         self.db.commit()
@@ -138,9 +147,69 @@ class OnlineRoomService:
         if room.status != OnlineRoomStatus.WAITING.value:
             raise OnlineRoomError("Only waiting rooms can be cancelled", status_code=400)
 
+        now = _utcnow()
         room.status = OnlineRoomStatus.CANCELLED.value
+        room.host_presence_state = LEFT
+        room.host_left_at = now
+        room.host_leave_reason = "user_quit"
         self.db.commit()
         return self._build_response(self._load_room(room.id), host_id)
+
+    def heartbeat_waiting_room(
+        self,
+        room_code: str,
+        host_id: int,
+    ) -> OnlineRoomResponse:
+        room = self._load_room_by_code(room_code, for_update=True)
+        if room.host_user_id != host_id:
+            raise OnlineRoomError("Only the host can heartbeat this room", status_code=403)
+        if room.status != OnlineRoomStatus.WAITING.value:
+            raise OnlineRoomError("Only waiting rooms can receive heartbeat", status_code=400)
+
+        room.host_presence_state = ONLINE
+        room.host_last_seen_at = _utcnow()
+        room.host_disconnected_at = None
+        room.host_left_at = None
+        room.host_leave_reason = None
+        self.db.commit()
+        return self._build_response(self._load_room(room.id), host_id)
+
+    def leave_waiting_room(
+        self,
+        room_code: str,
+        host_id: int,
+        reason: str,
+    ) -> OnlineRoomResponse:
+        room = self._load_room_by_code(room_code, for_update=True)
+        if room.host_user_id != host_id:
+            raise OnlineRoomError("Only the host can leave this room", status_code=403)
+        if room.status != OnlineRoomStatus.WAITING.value:
+            raise OnlineRoomError("Only waiting rooms can be left", status_code=400)
+
+        self._cancel_waiting_room_for_host(room, reason)
+        self.db.commit()
+        return self._build_response(self._load_room(room.id), host_id)
+
+    def cancel_stale_waiting_rooms(self, timeout_seconds: int) -> int:
+        cutoff = _utcnow() - timedelta(seconds=timeout_seconds)
+        rooms = (
+            self.db.query(OnlineRoom)
+            .filter(OnlineRoom.status == OnlineRoomStatus.WAITING.value)
+            .all()
+        )
+
+        cancelled_count = 0
+        for room in rooms:
+            last_seen_at = room.host_last_seen_at or room.created_at
+            if last_seen_at is None or last_seen_at > cutoff:
+                continue
+            self._cancel_waiting_room_for_host(room, "timeout")
+            room.host_disconnected_at = last_seen_at
+            cancelled_count += 1
+
+        if cancelled_count:
+            self.db.commit()
+        return cancelled_count
 
     def cancel_waiting_rooms_for_user(self, user_id: int) -> int:
         rooms = (
@@ -155,7 +224,7 @@ class OnlineRoomService:
             return 0
 
         for room in rooms:
-            room.status = OnlineRoomStatus.CANCELLED.value
+            self._cancel_waiting_room_for_host(room, "user_quit")
 
         self.db.commit()
         return len(rooms)
@@ -263,6 +332,11 @@ class OnlineRoomService:
             settings=room.settings or {},
             host_player_name=room.host_player_name,
             guest_player_name=room.guest_player_name,
+            host_presence_state=room.host_presence_state,
+            host_last_seen_at=room.host_last_seen_at,
+            host_disconnected_at=room.host_disconnected_at,
+            host_left_at=room.host_left_at,
+            host_leave_reason=room.host_leave_reason,
             created_at=room.created_at,
             updated_at=room.updated_at,
             is_host=is_host,
@@ -302,6 +376,14 @@ class OnlineRoomService:
             data["match"] = settings.match.model_dump()
             
         return data
+
+    @staticmethod
+    def _cancel_waiting_room_for_host(room: OnlineRoom, reason: str) -> None:
+        now = _utcnow()
+        room.status = OnlineRoomStatus.CANCELLED.value
+        room.host_presence_state = LEFT
+        room.host_left_at = now
+        room.host_leave_reason = reason
 
     @staticmethod
     def _settings_request_value(settings: dict):

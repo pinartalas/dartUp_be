@@ -4,7 +4,14 @@ from typing import Any, Optional
 
 from pydantic import BaseModel, Field, model_validator
 
-from app.schemas.game import ForfeitResponse, GameSettings, GameStateResponse, GameType, WinnerResponse
+from app.schemas.game import (
+    ForfeitResponse,
+    GameSettings,
+    GameStateResponse,
+    GameType,
+    PlayerPresenceState,
+    WinnerResponse,
+)
 
 
 class OnlineRoomStatus(str, Enum):
@@ -47,6 +54,10 @@ class LeaveOnlineGameRequest(BaseModel):
     reason: OnlineLeaveReason
 
 
+class LeaveOnlineRoomRequest(BaseModel):
+    reason: OnlineLeaveReason
+
+
 class OnlineRoomCleanupResponse(BaseModel):
     cancelled_count: int
 
@@ -71,6 +82,11 @@ class OnlineRoomResponse(BaseModel):
     settings: dict[str, Any]
     host_player_name: str
     guest_player_name: Optional[str] = None
+    host_presence_state: PlayerPresenceState = PlayerPresenceState.ONLINE
+    host_last_seen_at: Optional[datetime] = None
+    host_disconnected_at: Optional[datetime] = None
+    host_left_at: Optional[datetime] = None
+    host_leave_reason: Optional[str] = None
     created_at: datetime
     updated_at: datetime
     is_host: bool = False

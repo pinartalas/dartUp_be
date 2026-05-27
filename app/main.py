@@ -21,10 +21,12 @@ from app.core.config import (
 from app.core.request_logging import install_request_logging
 from app.db.schema_updates import (
     ensure_game_player_presence_columns,
+    ensure_online_room_presence_columns,
     ensure_user_profile_columns,
 )
 from app.db.session import Base, SessionLocal, engine
 from app.services.online_presence_service import OnlinePresenceService
+from app.services.online_room_service import OnlineRoomService
 from app.services.realtime_service import game_connection_manager
 import app.models  # noqa: F401 — register ORM models with Base
 
@@ -44,6 +46,7 @@ if CORS_ORIGINS:
 Base.metadata.create_all(bind=engine)
 ensure_user_profile_columns(engine)
 ensure_game_player_presence_columns(engine)
+ensure_online_room_presence_columns(engine)
 UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
 app.mount("/uploads", StaticFiles(directory=UPLOADS_DIR), name="uploads")
 
@@ -59,6 +62,9 @@ async def _online_presence_timeout_loop() -> None:
         await asyncio.sleep(ONLINE_PRESENCE_SWEEP_INTERVAL_SECONDS)
         db = SessionLocal()
         try:
+            OnlineRoomService(db).cancel_stale_waiting_rooms(
+                ONLINE_DISCONNECT_TIMEOUT_SECONDS,
+            )
             events = OnlinePresenceService(db).process_timeouts(
                 ONLINE_DISCONNECT_TIMEOUT_SECONDS,
             )

@@ -1,4 +1,5 @@
 import pytest
+from datetime import datetime, timedelta, timezone
 
 from app.api.routes import games as game_routes
 from app.api.routes import online_rooms as online_room_routes
@@ -16,10 +17,16 @@ from app.schemas.game import (
 from app.schemas.online_room import (
     CreateOnlineRoomRequest,
     JoinOnlineRoomRequest,
+    LeaveOnlineRoomRequest,
+    OnlineLeaveReason,
     OnlineRoomStatus,
 )
 from app.services.game_service import GameService
 from app.services.online_room_service import OnlineRoomService
+
+
+def _utcnow() -> datetime:
+    return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
 def test_create_and_join_online_room_creates_game(db_session, owner, other_user):
@@ -37,6 +44,8 @@ def test_create_and_join_online_room_creates_game(db_session, owner, other_user)
     assert room.status == OnlineRoomStatus.WAITING
     assert room.room_code
     assert room.can_join is False
+    assert room.host_presence_state == "online"
+    assert room.host_last_seen_at is not None
 
     joined = service.join_room(
         room.room_code,
@@ -82,6 +91,71 @@ def test_creating_new_online_room_cancels_previous_waiting_room(db_session, owne
         == OnlineRoomStatus.CANCELLED
     )
     assert current.status == OnlineRoomStatus.WAITING
+
+
+def test_waiting_room_heartbeat_updates_host_presence(db_session, owner):
+    service = OnlineRoomService(db_session)
+    room = service.create_room(
+        owner,
+        CreateOnlineRoomRequest(game_type=GameType.X01, game_variant=301),
+    )
+
+    db_room = service._load_room_by_code(room.room_code)
+    db_room.host_presence_state = "left"
+    db_room.host_last_seen_at = _utcnow() - timedelta(minutes=1)
+    db_room.host_left_at = _utcnow() - timedelta(minutes=1)
+    db_room.host_leave_reason = "timeout"
+    db_session.commit()
+
+    heartbeat = online_room_routes.heartbeat_online_room(
+        room.room_code,
+        db_session,
+        owner,
+    )
+
+    assert heartbeat.status == OnlineRoomStatus.WAITING
+    assert heartbeat.host_presence_state == "online"
+    assert heartbeat.host_last_seen_at is not None
+    assert heartbeat.host_left_at is None
+    assert heartbeat.host_leave_reason is None
+
+
+def test_waiting_room_leave_endpoint_cancels_room(db_session, owner):
+    service = OnlineRoomService(db_session)
+    room = service.create_room(
+        owner,
+        CreateOnlineRoomRequest(game_type=GameType.X01, game_variant=301),
+    )
+
+    response = online_room_routes.leave_online_room(
+        room.room_code,
+        LeaveOnlineRoomRequest(reason=OnlineLeaveReason.LEFT_SCREEN),
+        db_session,
+        owner,
+    )
+
+    assert response.status == OnlineRoomStatus.CANCELLED
+    assert response.host_presence_state == "left"
+    assert response.host_leave_reason == OnlineLeaveReason.LEFT_SCREEN.value
+
+
+def test_stale_waiting_room_host_timeout_cancels_room(db_session, owner):
+    service = OnlineRoomService(db_session)
+    room = service.create_room(
+        owner,
+        CreateOnlineRoomRequest(game_type=GameType.X01, game_variant=301),
+    )
+    db_room = service._load_room_by_code(room.room_code)
+    db_room.host_last_seen_at = _utcnow() - timedelta(seconds=31)
+    db_session.commit()
+
+    cancelled_count = service.cancel_stale_waiting_rooms(timeout_seconds=30)
+
+    assert cancelled_count == 1
+    cancelled = service.get_room(room.room_code, owner.id)
+    assert cancelled.status == OnlineRoomStatus.CANCELLED
+    assert cancelled.host_presence_state == "left"
+    assert cancelled.host_leave_reason == "timeout"
 
 
 def test_cancel_current_user_waiting_rooms_endpoint(db_session, owner, other_user):

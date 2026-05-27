@@ -21,6 +21,7 @@ from app.schemas.online_room import (
     CreateOnlineRoomRequest,
     JoinOnlineRoomRequest,
     LeaveOnlineGameRequest,
+    LeaveOnlineRoomRequest,
     OnlineGameLeaveResponse,
     OnlineRoomCleanupResponse,
     OnlineRoomListResponse,
@@ -148,6 +149,35 @@ def cancel_online_room(
 ):
     try:
         return OnlineRoomService(db).cancel_room(room_code, current_user.id)
+    except OnlineRoomError as exc:
+        _handle_online_room_error(exc)
+
+
+@router.post("/{room_code}/heartbeat", response_model=OnlineRoomResponse)
+def heartbeat_online_room(
+    room_code: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    try:
+        return OnlineRoomService(db).heartbeat_waiting_room(room_code, current_user.id)
+    except OnlineRoomError as exc:
+        _handle_online_room_error(exc)
+
+
+@router.post("/{room_code}/leave", response_model=OnlineRoomResponse)
+def leave_online_room(
+    room_code: str,
+    request: LeaveOnlineRoomRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    try:
+        return OnlineRoomService(db).leave_waiting_room(
+            room_code,
+            current_user.id,
+            request.reason.value,
+        )
     except OnlineRoomError as exc:
         _handle_online_room_error(exc)
 

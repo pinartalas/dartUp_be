@@ -39,6 +39,11 @@ class OnlineRoom(Base):
     settings = Column(JSON, nullable=False, default=lambda: {})
 
     status = Column(String(20), nullable=False, default="waiting", index=True)
+    host_presence_state = Column(String(20), nullable=False, default="online", index=True)
+    host_last_seen_at = Column(DateTime, nullable=True)
+    host_disconnected_at = Column(DateTime, nullable=True)
+    host_left_at = Column(DateTime, nullable=True)
+    host_leave_reason = Column(String(30), nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at = Column(
         DateTime,
