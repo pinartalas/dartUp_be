@@ -354,6 +354,8 @@ class OnlineRoomService:
 
     @staticmethod
     def _resolve_player_name(user: User, provided_name: Optional[str]) -> str:
+        if user.username and user.username.strip():
+            return user.username.strip()
         if provided_name and provided_name.strip():
             return provided_name.strip()
         if user.full_name:

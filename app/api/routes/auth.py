@@ -13,6 +13,7 @@ from app.schemas.auth import (
 )
 from app.services.google_auth_service import GoogleAuthError, verify_google_id_token
 from app.services.online_room_service import OnlineRoomService
+from app.services.username_service import generate_default_username
 
 router = APIRouter(tags=["auth"])
 
@@ -69,6 +70,11 @@ def social_login(request: SocialLoginRequest, db: Session = Depends(get_db)):
     new_user = User(
         email=email,
         full_name=display_name,
+        username=generate_default_username(
+            db,
+            display_name=display_name,
+            email=email,
+        ),
         auth_provider=provider,
         provider_user_id=provider_user_id,
     )

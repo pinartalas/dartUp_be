@@ -43,6 +43,32 @@ def test_google_social_login_uses_verified_token_payload(db_session, monkeypatch
     assert user.provider_user_id == "google-sub-123"
     assert user.email == "verified@example.com"
     assert user.full_name == "Verified User"
+    assert user.username == "verified_user"
+    assert user.username_changed_at is None
+
+
+def test_social_login_generates_unique_username_from_display_name(db_session):
+    existing_user = User(
+        email="existing@example.com",
+        full_name="Existing User",
+        username="dart_player",
+        auth_provider="google",
+        provider_user_id="existing-sub",
+    )
+    db_session.add(existing_user)
+    db_session.commit()
+
+    response = auth_routes.social_login(
+        SocialLoginRequest(
+            provider="apple",
+            provider_user_id="apple-sub-123",
+            email="new@example.com",
+            display_name="Dart Player",
+        ),
+        db_session,
+    )
+
+    assert response["user"].username == "dart_player_2"
 
 
 def test_google_social_login_finds_existing_user_by_verified_sub(

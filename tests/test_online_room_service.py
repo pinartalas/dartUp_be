@@ -31,6 +31,9 @@ def _utcnow() -> datetime:
 
 def test_create_and_join_online_room_creates_game(db_session, owner, other_user):
     service = OnlineRoomService(db_session)
+    owner.username = "host_username"
+    other_user.username = "guest_username"
+    db_session.commit()
 
     room = service.create_room(
         owner,
@@ -44,6 +47,7 @@ def test_create_and_join_online_room_creates_game(db_session, owner, other_user)
     assert room.status == OnlineRoomStatus.WAITING
     assert room.room_code
     assert room.can_join is False
+    assert room.host_player_name == "host_username"
     assert room.host_presence_state == "online"
     assert room.host_last_seen_at is not None
 
@@ -56,7 +60,13 @@ def test_create_and_join_online_room_creates_game(db_session, owner, other_user)
     assert joined.status == OnlineRoomStatus.ACTIVE
     assert joined.game_id is not None
     assert joined.guest_user_id == other_user.id
+    assert joined.host_player_name == "host_username"
+    assert joined.guest_player_name == "guest_username"
     assert joined.game is not None
+    assert [player.name for player in joined.game.players] == [
+        "host_username",
+        "guest_username",
+    ]
     assert [player.user_id for player in joined.game.players] == [
         owner.id,
         other_user.id,
